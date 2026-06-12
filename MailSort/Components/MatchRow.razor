@@ -37,8 +37,8 @@
                      @onclick="() => OpenFull(scan)">
                     <img src="@scan.ImageUrl" alt="@scan.FileName" />
                     <div class="match-img-label">full scan &nbsp;@(scan.WidthPx ?? 0)x@(scan.HeightPx ?? 0)</div>
-                    <div class="match-img-timing">fp: @scan.FingerprintMs ms</div>
                 </div>
+                <div class="match-img-timing">fp: @scan.FingerprintMs ms</div>
 
                 @if (!string.IsNullOrEmpty(scan.AddressRoiUrl))
                 {
