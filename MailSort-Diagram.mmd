@@ -1,0 +1,30 @@
+flowchart LR
+    classDef machine fill:#1F3A5F,stroke:#0F1F33,stroke-width:2px,color:#FFFFFF
+    classDef app fill:#2E7D32,stroke:#1B4D1F,stroke-width:2px,color:#FFFFFF
+    classDef op fill:#F2A900,stroke:#A06F00,stroke-width:2px,color:#1A1A1A
+    classDef ai fill:#6A1B9A,stroke:#3F0F5C,stroke-width:2px,color:#FFFFFF
+    classDef db fill:#37474F,stroke:#1C272D,stroke-width:2px,color:#FFFFFF
+
+    Sorter["Mail Sorting Machine<br/>(scanner + divert arms)"]:::machine
+    App["Our App<br/>(≤ 400 ms decision,<br/>fingerprint in / tray out)"]:::app
+    Op["Operator<br/>(reject-bin handler,<br/>manual confirm)"]:::op
+    AI["Local AI Server<br/>(ASUS GX10 / GB10,<br/>handwriting OCR)"]:::ai
+    DB[("Database<br/>(envelope_lookup,<br/>recipient registry)")]:::db
+
+    %% Hot path - first scan, bad barcode
+    Sorter -- "1. scan + image<br/>(≤ 400 ms budget)" --> App
+    App -- "2a. tray = REJECT_BIN<br/>(no verified record)" --> Sorter
+    Sorter -- "3. physical divert" --> Op
+
+    %% Re-feed path
+    Op -- "4. re-feeds envelope<br/>(minutes/hours later)" --> Sorter
+    Sorter -- "5. scan + image" --> App
+    App -- "2b. tray = routed<br/>(verified record found)" --> Sorter
+
+    %% Out-of-band AI path
+    App -. "6. fire-and-forget job<br/>(envelope_id, image)" .-> AI
+    App <--> DB
+    AI <--> DB
+    AI -. "7a. writes verified row<br/>(name, id, tray, verified_by='ai')" .-> DB
+    AI -. "7b. notifies on low confidence<br/>or no registry match" .-> Op
+    Op -. "7c. confirms or corrects<br/>(verified_by='manual')" .-> DB

@@ -1,0 +1,106 @@
+@using Microsoft.AspNetCore.Components
+
+<div class="card">
+    <img src="@Item.ImageUrl" alt="Envelope" />
+    <div class="meta">
+        <div><b>Scan time:</b> @Item.ScanTimeUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</div>
+        @if (!string.IsNullOrEmpty(Item.MachineScanId))
+        {
+            <div><b>Scan ID:</b> @Item.MachineScanId</div>
+        }
+    </div>
+
+    <div class="form">
+        <label>
+            2D Barcode
+            <input @bind="_barcode" @bind:event="oninput" placeholder="Type the barcode from the envelope" />
+        </label>
+        <label>
+            Tray
+            <input type="number" min="1" @bind="_tray" />
+        </label>
+        <label>
+            Operator
+            <input @bind="_by" placeholder="Your name (optional)" />
+        </label>
+        <div class="actions">
+            <button disabled="@(!CanSave || _saving)" @onclick="Save">
+                @(_saving ? "Saving…" : "Save and route")
+            </button>
+            <button class="secondary" disabled="@_saving" @onclick="Dismiss">Dismiss</button>
+        </div>
+        @if (!string.IsNullOrEmpty(_status))
+        {
+            <div class="status">@_status</div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public NeedsEntryItem Item { get; set; } = default!;
+    [Parameter] public EventCallback OnSaved { get; set; }
+
+    [Inject] private ApiClient Api { get; set; } = default!;
+
+    private string? _barcode;
+    private int _tray;
+    private string? _by;
+    private string? _status;
+    private bool _saving;
+
+    private bool CanSave => !string.IsNullOrWhiteSpace(_barcode) && _tray > 0;
+
+    private async Task Save()
+    {
+        _saving = true; _status = null;
+        try
+        {
+            var resp = await Api.Http.PostAsJsonAsync(
+                Api.Api($"/api/envelopes/{Item.Id}/manual-entry"),
+                new { barcode = _barcode, tray = _tray, enteredBy = _by });
+            if (resp.IsSuccessStatusCode)
+            {
+                _status = "Saved.";
+                await OnSaved.InvokeAsync();
+            }
+            else
+            {
+                _status = $"Save failed: {(int)resp.StatusCode} {await resp.Content.ReadAsStringAsync()}";
+            }
+        }
+        catch (Exception ex)
+        {
+            _status = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task Dismiss()
+    {
+        _saving = true; _status = null;
+        try
+        {
+            var resp = await Api.Http.PostAsync(Api.Api($"/api/envelopes/{Item.Id}/dismiss"), content: null);
+            if (resp.IsSuccessStatusCode)
+            {
+                _status = "Dismissed.";
+                await OnSaved.InvokeAsync();
+            }
+            else
+            {
+                _status = $"Dismiss failed: {(int)resp.StatusCode}";
+            }
+        }
+        catch (Exception ex)
+        {
+            _status = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

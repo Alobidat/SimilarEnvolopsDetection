@@ -1,0 +1,109 @@
+@*
+    A single duplicate-scan row. Used by the Duplicate-Scan Test page.
+    Renders one column per scan (full image + address-ROI crop + barcode-ROI
+    crop), followed by a small "Hamming" card on the right. Every image
+    is clickable to open the modal popup.
+*@
+@using MailSort.Api
+
+<div class="match-row @(Row.EngineRecognizedPair == true ? "ok" : Row.EngineRecognizedPair == false ? "miss" : "singleton")">
+    <div class="match-head">
+        <div class="env-id">
+            <span class="mono">@Row.EnvelopeId</span>
+            <span class="badge">@(Row.Scans.Count + " " + (Row.Scans.Count == 1 ? "scan" : "scans"))</span>
+        </div>
+        <div class="verdict">
+            @if (Row.EngineRecognizedPair == true)
+            {
+                <span class="pill ok">OK</span>
+            }
+            else if (Row.EngineRecognizedPair == false)
+            {
+                <span class="pill miss">MISS</span>
+            }
+            else
+            {
+                <span class="pill singleton">singleton</span>
+            }
+            <span class="verdict-text">@Row.EngineVerdict</span>
+        </div>
+    </div>
+
+    <div class="match-scans">
+        @foreach (var scan in Row.Scans)
+        {
+            <div class="match-scan">
+                <div class="match-img full" title="@($"Click to view full-size {scan.FileName}")"
+                     @onclick="() => OpenFull(scan)">
+                    <img src="@scan.ImageUrl" alt="@scan.FileName" />
+                    <div class="match-img-label">full scan &nbsp;@(scan.WidthPx ?? 0)x@(scan.HeightPx ?? 0)</div>
+                    <div class="match-img-timing">fp: @scan.FingerprintMs ms</div>
+                </div>
+
+                @if (!string.IsNullOrEmpty(scan.AddressRoiUrl))
+                {
+                    <div class="match-img roi" title="@($"Click to view full-size address ROI of {scan.FileName}")"
+                         @onclick="() => OpenAddress(scan)">
+                        <img src="@scan.AddressRoiUrl" alt="address ROI of @scan.FileName" />
+                        <div class="match-img-label">address ROI &nbsp;@scan.AddressPHashHex</div>
+                    </div>
+                }
+
+                @if (!string.IsNullOrEmpty(scan.BarcodeRoiUrl))
+                {
+                    <div class="match-img roi" title="@($"Click to view full-size barcode ROI of {scan.FileName}")"
+                         @onclick="() => OpenBarcode(scan)">
+                        <img src="@scan.BarcodeRoiUrl" alt="barcode ROI of @scan.FileName" />
+                        <div class="match-img-label">barcode ROI &nbsp;@scan.BarcodePHashHex</div>
+                    </div>
+                }
+            </div>
+        }
+
+        @if (Row.IsDuplicateGroup && Row.Scans.Count >= 2)
+        {
+            <div class="match-scan hamming-card">
+                <div class="hamming-title">Hamming between scans 1 &amp; 2</div>
+                <table class="hamming-table">
+                    <tr><th>Address</th><td><b>@(Row.AddressHammingBetweenFirstTwo?.ToString() ?? "n/a")</b></td></tr>
+                    <tr><th>Barcode</th><td><b>@(Row.BarcodeHammingBetweenFirstTwo?.ToString() ?? "n/a")</b></td></tr>
+                    <tr><th>Center</th><td><b>@(Row.CenterlineHammingBetweenFirstTwo?.ToString() ?? "n/a")</b></td></tr>
+                </table>
+                @if (!string.IsNullOrEmpty(Row.ClosestNonPairFileName))
+                {
+                    <div class="hamming-detail">
+                        Closest non-pair: <span class="mono">@Row.ClosestNonPairFileName</span> (addr=@Row.ClosestNonPairAddressHamming)
+                    </div>
+                }
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public DuplicateScanRow Row { get; set; } = default!;
+    [Parameter] public EventCallback<(string Url, string Title, string Meta)> OnImageClick { get; set; }
+
+    private Task OpenFull(DuplicateScanViewModel scan) =>
+        OnImageClick.InvokeAsync((scan.ImageUrl, scan.FileName + " (full)", BuildScanMeta(scan)));
+
+    private Task OpenAddress(DuplicateScanViewModel scan) =>
+        OnImageClick.InvokeAsync((scan.AddressRoiUrl!, scan.FileName + " - address ROI", BuildRoiMeta(scan, "address", scan.AddressPHashHex)));
+
+    private Task OpenBarcode(DuplicateScanViewModel scan) =>
+        OnImageClick.InvokeAsync((scan.BarcodeRoiUrl!, scan.FileName + " - barcode ROI", BuildRoiMeta(scan, "barcode", scan.BarcodePHashHex)));
+
+    private string BuildScanMeta(DuplicateScanViewModel scan) =>
+        "Size: " + FormatBytes(scan.SizeBytes) + "   Dims: " + (scan.WidthPx is null ? "n/a" : scan.WidthPx + "x" + scan.HeightPx) + "   Skew: " + scan.SkewDegrees + " deg   " +
+        "Address: " + scan.AddressPHashHex + "   Barcode: " + scan.BarcodePHashHex + "   Center: " + scan.CenterlineHashHex;
+
+    private static string BuildRoiMeta(DuplicateScanViewModel scan, string which, string pHashHex) =>
+        which + " pHash: " + pHashHex + "   Skew: " + scan.SkewDegrees + " deg";
+
+    private static string FormatBytes(long b)
+    {
+        if (b < 1024) return b + " B";
+        if (b < 1024 * 1024) return (b / 1024.0).ToString("F1") + " KB";
+        return (b / (1024.0 * 1024.0)).ToString("F2") + " MB";
+    }
+}

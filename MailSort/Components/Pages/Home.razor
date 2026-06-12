@@ -1,0 +1,56 @@
+@page "/"
+
+<PageTitle>Needs Manual Entry</PageTitle>
+
+<h2>Envelopes awaiting manual entry</h2>
+
+@if (_loading)
+{
+    <p>Loading…</p>
+}
+else if (_error is not null)
+{
+    <p class="error">@_error</p>
+}
+else if (_items.Count == 0)
+{
+    <p class="muted">No envelopes pending. The machine will land new ones here when its 2D barcode is unreadable.</p>
+}
+else
+{
+    <div class="grid">
+        @foreach (var env in _items)
+        {
+            <EnvelopeCard Item="env" OnSaved="Reload" />
+        }
+    </div>
+}
+
+@code {
+    [Inject] private ApiClient Api { get; set; } = default!;
+
+    private List<NeedsEntryItem> _items = new();
+    private bool _loading = true;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync() => await Reload();
+
+    private async Task Reload()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            var resp = await Api.Http.GetFromJsonAsync<List<NeedsEntryItem>>(Api.Api("/api/envelopes/needs-entry"));
+            _items = resp ?? new();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+}

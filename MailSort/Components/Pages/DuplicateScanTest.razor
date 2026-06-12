@@ -1,0 +1,236 @@
+@page "/duplicate-scan-test"
+@using MailSort.Api
+@inject IJSRuntime JS
+
+<PageTitle>Duplicate-Scan Test</PageTitle>
+
+<h2>Duplicate-Scan Test — correct matches</h2>
+
+<p class="muted">
+    Pick a folder (or two folders) of MARS piece images and run the matcher.
+    When you specify a <b>second-scan folder</b>, the engine pairs each envelope
+    from the first folder with the same envelope from the second folder — ideal
+    for testing against output from the <a href="/rescan-simulator">Rescan Simulator</a>.
+    Leave the second folder blank to match within a single folder (e.g. files
+    with <code>- Copy</code> or <code>- Rescan</code> suffixes).
+    Every image is clickable to open a full-size popup.
+</p>
+
+<div class="form">
+    <div class="form inline">
+        <label class="folder-label">
+            First-scan folder
+            <input @bind="_folder" placeholder="e.g. C:\work\ELC\AI Detection\samples" />
+        </label>
+        <label class="check-label">
+            <input type="checkbox" @bind="_strict" />
+            Use data-driven (strict) thresholds
+        </label>
+        <label class="check-label">
+            <input type="checkbox" @bind="_showMisses" />
+            Also show MISS / singleton rows
+        </label>
+    </div>
+    <div class="form inline" style="margin-top:8px">
+        <label class="folder-label">
+            Second-scan folder <span class="muted">(optional)</span>
+            <input @bind="_folder2" placeholder="e.g. C:\work\ELC\AI Detection\samples-sim" />
+        </label>
+        <button disabled="@(_running || string.IsNullOrWhiteSpace(_folder))" @onclick="Run">
+            @(_running ? "Analyzing…" : "Analyze")
+        </button>
+        <button class="secondary" disabled="@_running" @onclick="ResetFolder">Reset to default</button>
+    </div>
+</div>
+
+@if (!string.IsNullOrEmpty(_error))
+{
+    <div class="error">@_error</div>
+}
+
+@if (_report is not null)
+{
+    @* ========== Stats summary ========== *@
+    <div class="stats">
+        <div class="stat">
+            <div class="stat-num">@_report.ScanCount</div>
+            <div class="stat-label">scans</div>
+        </div>
+        <div class="stat">
+            <div class="stat-num">@_report.EnvelopeCount</div>
+            <div class="stat-label">envelopes</div>
+        </div>
+        <div class="stat @(OkCount() > 0 ? "ok" : "warn")">
+            <div class="stat-num">@OkCount() <span class="stat-of">/ @_report.PairCount</span></div>
+            <div class="stat-label">pairs correctly recognized</div>
+        </div>
+        <div class="stat @(Tpr() >= 0.99 ? "ok" : "warn")">
+            <div class="stat-num">@FormatPct(Tpr())</div>
+            <div class="stat-label">true-positive rate</div>
+        </div>
+        @if (OkCount() > 0)
+        {
+            <div class="stat">
+                <div class="stat-num">@_report.Summary.AvgAddressHammingRecognized!.Value.ToString("F1")</div>
+                <div class="stat-label">avg address Hamming (OK pairs)</div>
+            </div>
+            <div class="stat">
+                <div class="stat-num">@_report.Summary.MaxAddressHammingRecognized!.Value.ToString("F0")</div>
+                <div class="stat-label">max address Hamming (OK pairs)</div>
+            </div>
+        }
+        <div class="stat warn">
+            <div class="stat-num">@_report.Summary.WithinThresholdButMissedCount</div>
+            <div class="stat-label">within-threshold misses</div>
+        </div>
+        <div class="stat warn">
+            <div class="stat-num">@_report.Summary.OutsideThresholdCount</div>
+            <div class="stat-label">outside-threshold pairs</div>
+        </div>
+        <div class="stat">
+            <div class="stat-num">@_report.Summary.ClosestNonPairOverlapCount</div>
+            <div class="stat-label">non-pair closer than pair</div>
+        </div>
+        <div class="stat">
+            <div class="stat-num">@_report.Summary.SingletonCount</div>
+            <div class="stat-label">singletons</div>
+        </div>
+    </div>
+
+    @* ========== ROI info ========== *@
+    <div class="roi-info">
+        <span class="roi-tag addr">address ROI: @_report.AddressRoi.ToString()</span>
+        <span class="roi-tag barc">barcode ROI: @_report.BarcodeRoi.ToString()</span>
+        <span class="roi-tag">thresholds aMax=@_report.MaxAddressPHashDistance, bMax=@_report.MaxBarcodePHashDistance (@(_report.DefaultThresholds ? "default" : "strict, data-driven"))</span>
+    @if (!string.IsNullOrEmpty(_report.Folder2))
+    {
+        <span class="roi-tag">first-scan: @_report.Folder</span>
+        <span class="roi-tag">second-scan: @_report.Folder2</span>
+    }
+    </div>
+
+    @* ========== OK rows (always shown) ========== *@
+    @if (OkRows.Count == 0)
+    {
+        <div class="empty">
+            No correct matches in this folder. Toggle <b>Also show MISS / singleton rows</b>
+            below to see the rest of the report.
+        </div>
+    }
+    else
+    {
+        <h3>Correct matches (@OkRows.Count)</h3>
+        <div class="rows">
+            @foreach (var row in OkRows)
+            {
+                <MatchRow Row="row" OnImageClick="HandleImageClick" />
+            }
+        </div>
+    }
+
+    @* ========== Non-OK rows (only when toggle is on) ========== *@
+    @if (_showMisses && OtherRows.Count > 0)
+    {
+        <h3>Other rows (@OtherRows.Count)</h3>
+        <div class="rows">
+            @foreach (var row in OtherRows)
+            {
+                <MatchRow Row="row" OnImageClick="HandleImageClick" />
+            }
+        </div>
+    }
+}
+
+@* ========== Image modal ========== *@
+@if (_popup is not null)
+{
+    <div class="modal-backdrop" @onclick="ClosePopup">
+        <div class="modal" @onclick:stopPropagation>
+            <button class="modal-close" @onclick="ClosePopup" aria-label="Close">×</button>
+            <div class="modal-title">@_popup.Title</div>
+            <div class="modal-meta">@_popup.Meta</div>
+            <img class="modal-img" src="@_popup.Url" alt="@_popup.Title" />
+            <div class="modal-footer">
+                <a class="modal-link" href="@_popup.Url" target="_blank" rel="noopener">Open in a new tab</a>
+                <button class="secondary" @onclick="ClosePopup">Close</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Inject] private ApiClient Api { get; set; } = default!;
+
+    private string _folder = string.Empty;
+    private string _folder2 = string.Empty;
+    private bool _strict;
+    private bool _showMisses;
+    private bool _running;
+    private string? _error;
+    private DuplicateScanReport? _report;
+    private PopupViewModel? _popup;
+
+    protected override void OnInitialized()
+    {
+        _folder = MailSort.Api.DuplicateScanEndpoints.DefaultSamplesFolder();
+    }
+
+    private void ResetFolder() => _folder = MailSort.Api.DuplicateScanEndpoints.DefaultSamplesFolder();
+
+    private int OkCount() => _report?.Rows.Count(r => r.EngineRecognizedPair == true) ?? 0;
+    private double Tpr() => _report is null || _report.PairCount == 0
+        ? 0
+        : (double)OkCount() / _report.PairCount;
+    private static string FormatPct(double v) => $"{v * 100.0:F0}%";
+
+    private IReadOnlyList<DuplicateScanRow> OkRows =>
+        _report is null
+            ? Array.Empty<DuplicateScanRow>()
+            : _report.Rows.Where(r => r.EngineRecognizedPair == true).ToList();
+
+    private IReadOnlyList<DuplicateScanRow> OtherRows =>
+        _report is null
+            ? Array.Empty<DuplicateScanRow>()
+            : _report.Rows.Where(r => r.EngineRecognizedPair != true).ToList();
+
+    private async Task Run()
+    {
+        _running = true;
+        _error = null;
+        try
+        {
+            var qs = $"/api/dup-test/analyze?folder={Uri.EscapeDataString(_folder)}&strict={(_strict ? "true" : "false")}";
+            if (!string.IsNullOrWhiteSpace(_folder2))
+                qs += $"&folder2={Uri.EscapeDataString(_folder2)}";
+            var url = Api.Api(qs);
+            _report = await Api.Http.GetFromJsonAsync<DuplicateScanReport>(url,
+                new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message + (ex.InnerException is null ? "" : " | inner: " + ex.InnerException.Message);
+            _report = null;
+        }
+        finally
+        {
+            _running = false;
+        }
+    }
+
+    private void OpenPopup(string url, string title, string meta)
+    {
+        _popup = new PopupViewModel(url, title, meta);
+    }
+
+    private Task HandleImageClick((string Url, string Title, string Meta) payload)
+        => InvokeAsync(() => OpenPopup(payload.Url, payload.Title, payload.Meta));
+
+    private async Task ClosePopup()
+    {
+        _popup = null;
+        // Return focus to the document so keyboard users can keep working.
+        try { await JS.InvokeVoidAsync("eval", "document.body.focus();"); } catch { }
+    }
+
+    private sealed record PopupViewModel(string Url, string Title, string Meta);
+}

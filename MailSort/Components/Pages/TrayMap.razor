@@ -1,0 +1,94 @@
+@page "/tray-map"
+
+<PageTitle>Tray Map</PageTitle>
+
+<h2>Barcode -> Tray mapping</h2>
+
+<p class="muted">Seed this from your CSV; the API uses it to resolve a tray for every barcode the machine reads.</p>
+
+<div class="form inline">
+    <input placeholder="Barcode" @bind="_barcode" />
+    <input type="number" min="1" placeholder="Tray" @bind="_tray" />
+    <input placeholder="Description (optional)" @bind="_desc" />
+    <button disabled="@(!CanAdd || _saving)" @onclick="Add">@(_saving ? "…" : "Add / update")</button>
+</div>
+
+@if (!string.IsNullOrEmpty(_status))
+{
+    <div class="status">@_status</div>
+}
+
+@if (_rows.Count == 0)
+{
+    <p class="muted">No mappings yet.</p>
+}
+else
+{
+    <table>
+        <thead>
+            <tr><th>Barcode</th><th>Tray</th><th>Description</th><th></th></tr>
+        </thead>
+        <tbody>
+            @foreach (var r in _rows)
+            {
+                <tr>
+                    <td>@r.Barcode</td>
+                    <td>@r.Tray</td>
+                    <td>@r.Description</td>
+                    <td><button class="link" @onclick="() => Delete(r.Barcode)">Delete</button></td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    [Inject] private ApiClient Api { get; set; } = default!;
+
+    private List<TrayMapRow> _rows = new();
+    private string? _barcode;
+    private int _tray;
+    private string? _desc;
+    private string? _status;
+    private bool _saving;
+    private bool CanAdd => !string.IsNullOrWhiteSpace(_barcode) && _tray > 0;
+
+    protected override async Task OnInitializedAsync() => await Reload();
+
+    private async Task Reload()
+    {
+        var resp = await Api.Http.GetFromJsonAsync<List<TrayMapRow>>(Api.Api("/api/tray-map"));
+        _rows = resp ?? new();
+    }
+
+    private async Task Add()
+    {
+        _saving = true; _status = null;
+        try
+        {
+            var resp = await Api.Http.PostAsJsonAsync(Api.Api("/api/tray-map"),
+                new { barcode = _barcode, tray = _tray, description = _desc });
+            if (resp.IsSuccessStatusCode)
+            {
+                _barcode = _desc = null; _tray = 0;
+                await Reload();
+                _status = "Saved.";
+            }
+            else
+            {
+                _status = $"Save failed: {(int)resp.StatusCode}";
+            }
+        }
+        catch (Exception ex) { _status = ex.Message; }
+        finally { _saving = false; }
+    }
+
+    private async Task Delete(string barcode)
+    {
+        var resp = await Api.Http.DeleteAsync(Api.Api($"/api/tray-map/{Uri.EscapeDataString(barcode)}"));
+        if (resp.IsSuccessStatusCode)
+        {
+            await Reload();
+        }
+    }
+}
